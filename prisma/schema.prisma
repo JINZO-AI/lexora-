@@ -1,0 +1,251 @@
+// LEXORA - AI Contract Intelligence Platform
+// Prisma Schema (SQLite)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USERS ====================
+model User {
+  id                          String              @id @default(cuid())
+  email                       String              @unique
+  name                        String?
+  passwordHash                String
+  avatar                      String?
+  companyName                 String?
+  companySize                 String?             // solo | small | medium | enterprise
+  role                        String              @default("user") // user | admin
+  subscriptionPlan            String              @default("free") // free | pro | business
+  subscriptionExpiresAt       DateTime?
+  stripeCustomerId            String?             @unique
+  contractsAnalyzedThisMonth  Int                 @default(0)
+  monthlyLimit                Int                 @default(5)
+  timezone                    String              @default("UTC")
+  preferredLanguage           String              @default("en")
+  isSuspended                 Boolean             @default(false)
+  createdAt                   DateTime            @default(now())
+  updatedAt                   DateTime            @updatedAt
+
+  contracts                   Contract[]
+  tags                        ContractTag[]
+  templates                   ContractTemplate[]
+  reminders                   ContractReminder[]
+  notifications               Notification[]
+  auditLogs                   AuditLog[]
+  analysisLogs                AiAnalysisLog[]
+
+  @@map("users")
+}
+
+// ==================== SUBSCRIPTION PLANS ====================
+model SubscriptionPlan {
+  id                    Int       @id @default(autoincrement())
+  name                  String
+  slug                  String    @unique
+  priceMonthly          Float
+  priceYearly           Float
+  contractLimitMonthly  Int       // -1 = unlimited
+  features              String    // JSON string
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("subscription_plans")
+}
+
+// ==================== CONTRACTS ====================
+model Contract {
+  id                    String             @id @default(cuid())
+  userId                String
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                 String
+  filePath              String             // relative to storage root
+  fileName              String
+  fileSize             Int
+  fileHash             String             // SHA256 for duplicate detection
+  mimeType             String
+  status               String             @default("uploaded") // uploaded | processing | analyzed | failed | archived
+  language             String?
+  pageCount            Int?
+  wordCount            Int?
+  contractType         String             @default("custom") // employment | nda | vendor | service | lease | partnership | custom
+  riskScore            Int?               // 0-100
+  riskLevel            String?            // low | medium | high | critical
+  summary              String?
+  missingClauses       String?            // JSON string
+  negotiationPriorities String?           // JSON string
+  immediateRedFlags    String?            // JSON string
+  analyzedAt           DateTime?
+  expiresAt            DateTime?
+  reminderSentAt       DateTime?
+  notes                String?
+  isStarred            Boolean            @default(false)
+  isShared             Boolean            @default(false)
+  shareToken           String?            @unique
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  clauses              ContractClause[]
+  tags                 ContractTagPivot[]
+  reminders            ContractReminder[]
+  analysisLogs         AiAnalysisLog[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([riskLevel])
+  @@map("contracts")
+}
+
+// ==================== CONTRACT CLAUSES ====================
+model ContractClause {
+  id                       String   @id @default(cuid())
+  contractId               String
+  contract                 Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  clauseType               String   // liability | payment | termination | ip_ownership | auto_renewal | confidentiality | dispute_resolution | warranty | indemnification | force_majeure | other
+  title                    String
+  originalText             String
+  pageNumber               Int?
+  charStart                Int?
+  charEnd                  Int?
+  riskScore                Int      // 0-100
+  riskLevel                String   // safe | attention | warning | critical
+  riskExplanation          String
+  plainEnglish             String
+  industryStandardClause   String?
+  suggestedCounterProposal String?
+  isReviewedByUser         Boolean  @default(false)
+  userNote                 String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([contractId])
+  @@index([riskLevel])
+  @@map("contract_clauses")
+}
+
+// ==================== CONTRACT TAGS ====================
+model ContractTag {
+  id        String               @id @default(cuid())
+  userId    String
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  color     String               @default("#01696f")
+  contracts ContractTagPivot[]
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@unique([userId, name])
+  @@map("contract_tags")
+}
+
+model ContractTagPivot {
+  contractId String
+  contract   Contract     @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tagId      String
+  tag        ContractTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contractId, tagId])
+  @@map("contract_tag_pivot")
+}
+
+// ==================== CONTRACT REMINDERS ====================
+model ContractReminder {
+  id           String    @id @default(cuid())
+  contractId   String
+  contract     Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminderType String    // expiry | review | renewal_decision
+  remindAt     DateTime
+  daysBefore   Int
+  isSent       Boolean   @default(false)
+  channel      String    @default("in_app") // email | in_app | both
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([contractId])
+  @@map("contract_reminders")
+}
+
+// ==================== CONTRACT TEMPLATES ====================
+model ContractTemplate {
+  id              String    @id @default(cuid())
+  createdBy       String
+  user            User      @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  category        String    @default("general")
+  language        String    @default("en")
+  content         String
+  variables       String?   // JSON string of variable names
+  isPublic        Boolean   @default(false)
+  usageCount      Int       @default(0)
+  isApproved      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([createdBy])
+  @@index([isPublic])
+  @@map("contract_templates")
+}
+
+// ==================== AI ANALYSIS LOGS ====================
+model AiAnalysisLog {
+  id              String     @id @default(cuid())
+  contractId      String?
+  contract        Contract?  @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  modelUsed       String
+  promptTokens    Int        @default(0)
+  completionTokens Int       @default(0)
+  totalTokens     Int        @default(0)
+  latencyMs       Int        @default(0)
+  status          String     @default("success") // success | failed | partial
+  errorMessage    String?
+  taskType        String     @default("analysis") // analysis | counter_proposal | template_generation
+  userId          String?
+  user            User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt       DateTime   @default(now())
+
+  @@index([contractId])
+  @@map("ai_analysis_logs")
+}
+
+// ==================== NOTIFICATIONS ====================
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  actionUrl String?
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+// ==================== AUDIT LOGS ====================
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  oldValues  String?  // JSON
+  newValues  String?  // JSON
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@map("audit_logs")
+}
